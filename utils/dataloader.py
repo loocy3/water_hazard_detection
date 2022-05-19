@@ -11,12 +11,14 @@ from torchvision import transforms
 from scipy.io import loadmat
 import torch.nn.functional as F
 
-USE_VISO = True
+USE_VISO = False
 ORI_MASK = True
+USE_VISO_HOMO = True
 
 num_thread_workers = 0
-root_dir = '../Dataset/'
+root_dir = '/data/dataset/water_hazard/'
 viso_dir = 'viso'
+viso_homo_dir = 'viso_homo'
 
 if USE_VISO:
     process_size = (480,480)#(256,256)
@@ -25,7 +27,7 @@ if USE_VISO:
     else:
         mask_size = process_size
 else:
-    process_size = (240,320)
+    process_size = (256,480)
     mask_size = process_size
 
 map1x, map1y, map2x, map2y, mat, Q1 = \
@@ -124,12 +126,6 @@ class RoadDataset(Dataset):
         else:
             fname = 'left_mask_%09d.png' % (file_num)
             img_folder = 'video_off_road'
-            # r_dict = self.r_dict_off
-
-        # if 'img_%09d' % (file_num) in r_dict.keys():
-        #     R = r_dict['img_%09d' % (file_num)]
-        # else:
-        #     R = np.eye(3)
 
         if USE_VISO:
             if ORI_MASK:
@@ -137,26 +133,17 @@ class RoadDataset(Dataset):
             img_folder = os.path.join(self.root, viso_dir, img_folder)
             if not ORI_MASK:
                 fname = os.path.join(img_folder, fname)
+        elif USE_VISO_HOMO:
+            fname = os.path.join(self.root, 'masks', img_folder[6:], fname)
+            img_folder = os.path.join(self.root, viso_homo_dir, img_folder)
         else:
             fname = os.path.join(self.root,'masks', img_folder[6:], fname)
             img_folder = os.path.join(self.root,img_folder)
         mask = cv2.imread(fname, 0) # grey sclae
 
-        # # crop up 2/3
-        # H, W = mask.shape
-        # mask = mask[:H * 2 // 3, W // 6:W * 5 // 6]
-
         mask = self.mask_transform(mask)
         mask[mask > 0.5] = 1.
         mask[mask <= 0.5] = 0.
-
-        # for test mask
-        if 0:
-            fname_test = os.path.join(img_folder, fname[-23:])
-            test_mask = cv2.imread(fname_test, 0)
-            test_mask = self.img_transform(test_mask)
-            test_mask[test_mask > 0.5] = 1.
-            test_mask[test_mask <= 0.5] = 0.
 
         # load num_frames before truth mask.
         sequence_left = torch.tensor([])
@@ -165,11 +152,6 @@ class RoadDataset(Dataset):
             for sub_dir in ['left','right']:
                 image_file_dir = os.path.join(img_folder, sub_dir, 'img_%09d' % file_num)
                 file_names = os.listdir(image_file_dir)
-                # if len(file_names) < self.num_frames:
-                #     print( "only %d files in %s mask"%(len(file_names), fname ))
-                #     start_frame = 0
-                # else:
-                #     start_frame = len(file_names) - self.num_frames
 
                 # order by number
                 file_names = sorted(file_names)
@@ -178,10 +160,6 @@ class RoadDataset(Dataset):
                     frame = cv2.imread(os.path.join(image_file_dir, file_name))
                     assert frame is not None, f"file {os.path.join(image_file_dir, file_name)} open faild"
 
-                    # # crop up 2/3
-                    # H,W,_ = frame.shape
-                    # frame = frame[:H*2//3, W//6:W*5//6]
-
                     frame = self.img_transform(frame)
 
                     # maskout the part outside current image
@@ -189,6 +167,29 @@ class RoadDataset(Dataset):
                         valid_mask = (frame != 0)
                     else:
                         frame = frame*valid_mask
+                    if sub_dir == 'right':
+                        sequence_right = torch.cat((sequence_right, frame.unsqueeze(0)), dim=0)
+                    else:
+                        sequence_left = torch.cat((sequence_left, frame.unsqueeze(0)), dim=0)
+        elif USE_VISO_HOMO:
+            for sub_dir in ['left', 'right']:
+                image_file_dir = os.path.join(img_folder, sub_dir, 'img_%09d' % file_num)
+                file_names = os.listdir(image_file_dir)
+
+                # order by number
+                file_names = sorted(file_names)
+
+                for file_name in file_names[-1:-self.num_frames - 1:-1]:
+                    frame = cv2.imread(os.path.join(image_file_dir, file_name))
+                    assert frame is not None, f"file {os.path.join(image_file_dir, file_name)} open faild"
+
+                    frame = self.img_transform(frame)
+
+                    # maskout the part outside current image
+                    if file_name == file_names[-1]:
+                        valid_mask = (frame != 0)
+                    else:
+                        frame = frame * valid_mask
                     if sub_dir == 'right':
                         sequence_right = torch.cat((sequence_right, frame.unsqueeze(0)), dim=0)
                     else:
@@ -208,7 +209,7 @@ class RoadDataset(Dataset):
                 sequence_left = torch.cat((sequence_left, frame_left.unsqueeze(0)), dim=0)
                 sequence_right = torch.cat((sequence_right, frame_right.unsqueeze(0)), dim=0)
 
-        return mask.squeeze(), sequence_left, sequence_right #, test_mask.squeeze()
+        return mask.squeeze(), sequence_left, sequence_right
 
 def load_train_data(batch_size, sequence):
     img_transform = transforms.Compose([
@@ -264,7 +265,6 @@ def warp_image(image, warpMatrix):
 
 
 if __name__ == '__main__':
-    root_dir = '../../../Dataset/'
     loader = load_train_data(2, 8)
     for _, data in zip(range(1), loader):
         mask, left, right = data # left/right bev from current to previous

@@ -1,13 +1,13 @@
-
+import viso2
 import cv2
 import numpy as np
-import pyviso2.src.viso2 as viso2
 import os
 import re
 from scipy.io import savemat
 import zedutils
+from mayavi import mlab
 
-root_dir = '../../../Dataset/'
+root_dir = '/data/dataset/water_hazard/'
 save_dir = 'viso'
 
 map1x, map1y, map2x, map2y, mat, Q1 = \
@@ -31,7 +31,7 @@ def viso_init():
 
 if __name__ == '__main__':
     save_dir = os.path.join(root_dir, save_dir)
-    dirs = ['video_on_road', 'video_off_road']
+    dirs = ['video_on_road','video_off_road']
     for dir in dirs:
         viso, recon = viso_init()
         file_names = os.listdir(os.path.join(root_dir, dir))
@@ -41,6 +41,7 @@ if __name__ == '__main__':
 
         pose = viso2.Matrix_eye(4)
         motion_dict = {}
+        pose_dict = {}
         for file_name in file_names:
             if 'ppm' not in file_name:
                 continue
@@ -69,20 +70,45 @@ if __name__ == '__main__':
                 motion_dict[file_name[:13]] = motion_np
 
                 est_motion = viso2.Matrix_inv(motion)
-                pose = pose * est_motion  # motion is 4*4
+                pose = pose * est_motion
+                # save pose
+                pose_np = np.zeros((4, 4))
+                pose.toNumpy(pose_np)
+                pose_dict[file_name[:13]] = pose_np
 
                 num_matches = viso.getNumberOfMatches()
                 num_inliers = viso.getNumberOfInliers()
-                print('Matches:', num_matches, "Inliers:", 100 * num_inliers / num_matches, '%, Current pose:',
-                      pose)  # pose is 4*4 matrix
+                print('Matches:', num_matches, "Inliers:", 100 * num_inliers / num_matches, '%, Current pose:',pose)  # pose is 4*4 matrix
                 matches = viso.getMatches()
                 assert (matches.size() == num_matches)
                 recon.update(matches, motion, 0)
+
+                if 0: #debug
+                    if len(pose_dict.keys()) >= len(file_names)//3:
+                        break
             else:
                 print('.... failed!')
+                # save pose
+                pose_np = np.zeros((4, 4))
+                pose.toNumpy(pose_np)
+                pose_dict[file_name[:13]] = pose_np
+
+        if 1: #debug
+            points = recon.getPoints()
+            print("Reconstructed", points.size(), "points...")
+
+            pts = np.empty((points.size(), 3))
+            for i, p in enumerate(points):
+                pts[i, :] = (p.x, p.y, p.z)
+
+            mlab.figure()
+            mlab.points3d(pts[:, 0], pts[:, 1], pts[:, 2], colormap='copper')
+            mlab.show()
 
         # save motion file
         motion_file = os.path.join(save_dir, dir+"_motion.mat")
         savemat(motion_file, motion_dict)
+        pose_file = os.path.join(save_dir, dir+"_pose.mat")
+        savemat(pose_file, pose_dict)
 
     print("save motion finish")
