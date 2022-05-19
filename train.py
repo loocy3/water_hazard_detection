@@ -79,12 +79,12 @@ def Train( net, args, tb_writer):
                 img = transforms.functional.to_pil_image(mask[0], mode='L')
                 img.save('mask.png')
 
-            # turn pre_mask to ori size
-            pre_mask = bev_to_cam(pre_mask, mask.shape[-2:])
-
-            if 0: #debug
-                img = transforms.functional.to_pil_image(pre_mask[0], mode='L')
-                img.save('pre_tran_mask.png')
+            # # turn pre_mask to ori size
+            # pre_mask = bev_to_cam(pre_mask, mask.shape[-2:])
+            #
+            # if 0: #debug
+            #     img = transforms.functional.to_pil_image(pre_mask[0], mode='L')
+            #     img.save('pre_tran_mask.png')
 
             loss = criterion(mask,pre_mask)
 
@@ -143,15 +143,14 @@ def Val(net, args, tb_writer, best_result, epoch):
         if 0:  # debug
             img = transforms.functional.to_pil_image(pre_mask[0], mode='L')
             img.save('pre_mask.png')
-
-        # turn pre_mask to ori size
-        pre_mask = bev_to_cam(pre_mask, mask.shape[-2:])
-
-        if 0:  # debug
-            img = transforms.functional.to_pil_image(pre_mask[0], mode='L')
-            img.save('pre_tran_mask.png')
             img = transforms.functional.to_pil_image(mask[0], mode='L')
             img.save('mask.png')
+
+        # # turn pre_mask to ori size
+        # pre_mask = bev_to_cam(pre_mask, mask.shape[-2:])
+        # if 0:  # debug
+        #     img = transforms.functional.to_pil_image(pre_mask[0], mode='L')
+        #     img.save('pre_tran_mask.png')
 
         # mask = mask.flatten().int()
         # pre_mask = (pre_mask>=0.5).int().flatten().detach().cpu()
