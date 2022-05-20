@@ -203,11 +203,63 @@ def make_model(input_shape, n_classes, filter_size, kernel_size, pool_size):
     model = Model(img_input, o_flatten)
     return model
 
+class Conv3DBlock(nn.Module):
+    def __init__(self, in_ch, kernel_size=3, conv_channel=64):
+        self.conv3d = nn.conv3d(in_ch, conv_channel, kernel_size, padding='same', bias=False)
+        self.norm = nn.GroupNorm(32,conv_channel) # 64c to 32 group
+        self.active = nn.relu()
+    def forward(self, x, active=True):
+        x = self.conv3d(x)
+        x = self.norm(x)
+        if active:
+            x = self.active(x)
+        return x
 
-class 3DConvNet(nn.Module):
+class ResBlock(nn.Module):
+    def __init__(self):
+        self.conv3d_1 = Conv3DBlock(3,kernel_size=1, conv_channel=64)
+        self.conv3d_2 = Conv3DBlock(64, kernel_size=3, conv_channel=64)
+        self.conv3d_3 = Conv3DBlock(64, kernel_size=3, conv_channel=64)
+        self.norm = nn.GroupNorm(32,64) # 64c to 32 group
+        self.active = nn.relu()
+    def forward(self, x):
+        x = self.conv3d_1(x, active=False)
+        x = self.conv3d_2(x)
+        x = self.conv3d_3(x)
+        x = self.norm(x)
+        x = self.active(x)
+        x = self.norm(x)
+
+        return x
+
+class ResPath(nn.Module):
+    def __init__(self, middle_ch):
+        self.conv3d_1 = Conv3DBlock(64, middle_ch, kernel_size=1, active=False)
+        self.conv3d_3 = Conv3DBlock(64, middle_ch, kernel_size=3)
+        self.norm = nn.GroupNorm(32,64) # 64c to 32 group
+        self.active = nn.relu()
+    def forward(self, x, length):
+        shortcut = self.conv3d_1(x)
+        x = self.conv3d_3(x)
+        x = torch.cat([shortcut,x], dim=2) # [b,s,c,h,w]
+        x = self.active(x)
+        x = self.norm(x)
+        for i in range(length-1):
+            shortcut = self.conv3d_1(x)
+            x = self.conv3d_3(x)
+
+
+
+
+class Conv3DNet(nn.Module):
     def __init__(self, sequence=16):
         super(Net, self).__init__()
         self.sequence = sequence
+        self.res_block = ResBlock()
+        self.conv3d_block = Conv3DBlock(3,kernel_size=3, conv_channel=64)
+        self.norm = nn.GroupNorm(32, 64)
+        self.conv2d = nn.Conv2d(64,2048,7)
+
 
     def forward(self, left, light):
         # left,right from current to previous #[b,s,c,h,w]
@@ -219,9 +271,40 @@ class 3DConvNet(nn.Module):
             img = transforms.functional.to_pil_image(light[0, -1], mode='RGB')
             img.save('input_right.png')
 
-        # # align the 6DOF or 5DOF
-        # aligned_f = self.align(x[:,:-1], x[:,-1])
-        # aligned_f = torch.cat((aligned_f, x[:,-1:]), dim=1)
+        # Block1
+        part1,part2 = torch.split(left, 2, 1) #[b,s/2,c,h,w]
+        part1 = self.res_block(part1)
+        part2 = self.conv3d_block(part2)
+        left = torch.cat([part1,part2],dim=1)
+        left = self.norm(left)
+        left = torch.max_pool3d(left,2)
+
+        part1, part2 = torch.split(left, 2, 1)
+        part1_f = self.ResPath()
+        part2_f = self.conv3d_block(part2)
+        f1 = torch.cat([part1_f,part2_f],dim=1)
+
+        # Block 2 # only res_block on part1
+        part1 = self.res_block(part1)
+        left = torch.cat([part1, part2], dim=1)
+        left = self.norm(left)
+        left = torch.max_pool3d(left,2)
+
+        part1, part2 = torch.split(left, 2, 1)
+        part1_f = self.ResPath()
+        part2_f = self.conv3d_block(part2)
+        f2 = torch.cat([part1_f,part2_f],dim=1)
+
+        # Block 3 # only res_block on part1
+        part1 = self.res_block(part1)
+        left = torch.cat([part1, part2], dim=1)
+        left = self.norm(left)
+        left = torch.max_pool3d(left, 2)
+        f3 = left #[b,s,c,h,w]
+
+        # squeeze 0??
+        left =
+
 
         # only left
         prd_mask = self.reflec_detect(left.flatten(1,2))
