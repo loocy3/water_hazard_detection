@@ -6,6 +6,9 @@ import re
 from scipy.io import savemat
 import zedutils
 from mayavi import mlab
+from BEV_transform_withPose import cam_to_bev
+from PIL import Image
+import open3d as o3d
 
 root_dir = '/data/dataset/water_hazard/'
 save_dir = 'viso'
@@ -31,7 +34,7 @@ def viso_init():
 
 if __name__ == '__main__':
     save_dir = os.path.join(root_dir, save_dir)
-    dirs = ['video_on_road','video_off_road']
+    dirs = ['video_off_road']#,'video_off_road']
     for dir in dirs:
         viso, recon = viso_init()
         file_names = os.listdir(os.path.join(root_dir, dir))
@@ -39,14 +42,18 @@ if __name__ == '__main__':
         # order by number
         file_names = sorted(file_names)
 
+        last_bev = None
         pose = viso2.Matrix_eye(4)
         motion_dict = {}
-        pose_dict = {}
+        norm_dict = {}
         for file_name in file_names:
             if 'ppm' not in file_name:
                 continue
 
             file_num = int(re.findall('\d+', file_name)[0])
+            # if file_num == 2464: # for debug
+            #     viso, recon = viso_init()
+
             full_file_name = os.path.join(root_dir, dir, file_name)
             pair = cv2.imread(full_file_name)
             frame_left = pair[:, :pair.shape[1] // 2, :].copy()
@@ -62,19 +69,37 @@ if __name__ == '__main__':
             right_grey = cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY)
 
             if viso.process_frame(left_grey, right_grey):
-                motion = viso.getMotion()
+                motion = viso.getMotion() # p_t-1 -> p_t or p_t -> p_t-1
 
                 # save motion
                 motion_np = np.zeros((4, 4))
                 motion.toNumpy(motion_np)
                 motion_dict[file_name[:13]] = motion_np
 
-                est_motion = viso2.Matrix_inv(motion)
+                est_motion = viso2.Matrix_inv(motion) #p_t -> p_t-1 so inv
+                #est_motion = motion # p_t-1 -> p_t
                 pose = pose * est_motion
-                # save pose
-                pose_np = np.zeros((4, 4))
-                pose.toNumpy(pose_np)
-                pose_dict[file_name[:13]] = pose_np
+
+                # get inliner points and estimate norm of ground plane
+                inliers = viso.getInlierIndices()
+
+                # turn swig vector to pcd
+                pts = np.empty((inliers.size(), 3))
+                for i, p in enumerate(points):
+                    pts[i, :] = (p.x, p.y, p.z)
+
+                pcd = o3d.t.geometry.PointCloud()
+                pcd.point["positions"] = o3d.core.Tensor(pts)
+                plane_model, _ = pcd.segment_plane(distance_threshold=0.03,
+                                                         ransac_n=5,
+                                                         num_iterations=1000)
+                [a, b, c, d] = plane_model
+                print(f"Plane equation: {a:.2f}x + {b:.2f}y + {c:.2f}z + {d:.2f} = 0")
+                norm_dict[file_name[:13]] = np.array([a,b,c])
+
+                # pose_np = np.zeros((4, 4))
+                # pose.toNumpy(pose_np)
+                # pose_dict[file_name[:13]] = pose_np
 
                 num_matches = viso.getNumberOfMatches()
                 num_inliers = viso.getNumberOfInliers()
@@ -83,8 +108,8 @@ if __name__ == '__main__':
                 assert (matches.size() == num_matches)
                 recon.update(matches, motion, 0)
 
-                if 0: #debug
-                    if len(pose_dict.keys()) >= len(file_names)//3:
+                if 1: #debug
+                    if len(pose_dict.keys()) >= len(file_names)//10:
                         break
             else:
                 print('.... failed!')
@@ -108,7 +133,9 @@ if __name__ == '__main__':
         # save motion file
         motion_file = os.path.join(save_dir, dir+"_motion.mat")
         savemat(motion_file, motion_dict)
-        pose_file = os.path.join(save_dir, dir+"_pose.mat")
-        savemat(pose_file, pose_dict)
+        # pose_file = os.path.join(save_dir, dir+"_pose.mat")
+        # savemat(pose_file, pose_dict)
+        norm_file = os.path.join(save_dir, dir+"_norm.mat")
+        savemat(norm_file, norm_dict)
 
     print("save motion finish")
