@@ -19,6 +19,7 @@ from torchmetrics import Accuracy, Recall, F1Score, Precision
 
 from utils.dataloader import load_train_data, load_val_data, bev_to_cam
 from model import Net
+from model_3d import Conv3DNet
 import datetime
 from torchvision import transforms
 
@@ -195,15 +196,15 @@ def Val(net, args, tb_writer, best_result, epoch):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--resume', type=int, default=1, help='resume the trained model.1: whole model,2:only feature get part')
+    parser.add_argument('--resume', type=int, default=True, help='resume the trained model.1: whole model,2:only feature get part')
     parser.add_argument('--test', type=int, default=0, help='test with trained model')
     parser.add_argument('--debug', type=int, default=0, help='debug to dump middle processing images')
     parser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate') #1e-2
-    parser.add_argument('--batch', type=int, default=16, help='batch size')  # 1e-2
+    parser.add_argument('--batch', type=int, default=2, help='batch size')  # 1e-2
     parser.add_argument('--sequence', type=int, default=16, help='sequence of rgb images')
     
-    parser.add_argument('--experiment', type=str, default='weights/', help='dir to save net weights')
+    parser.add_argument('--experiment', type=str, default='weights/unet/', help='dir to save net weights')
 
     args = parser.parse_args()
     return args
@@ -221,6 +222,7 @@ if __name__ == '__main__':
 
     ####################### model assignment #######################
     net = Net() # add model !!!!!!!!!!!!!!!
+    #net = Conv3DNet(out_ch=1)
 
     if args.resume == 1:
         net.load_state_dict(torch.load(args.experiment+'Model_best.pth'))
